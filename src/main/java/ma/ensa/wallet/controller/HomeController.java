@@ -1,38 +1,40 @@
 package ma.ensa.wallet.controller;
 
-import ma.ensa.wallet.bitcoin.MyWallet;
-import ma.ensa.wallet.bitcoin.TransactionInfo;
+import ma.ensa.wallet.bitcoin.WalletCore;
+import ma.ensa.wallet.response.PublicAddress;
+import ma.ensa.wallet.response.SendResponse;
+import ma.ensa.wallet.response.TransactionInfo;
+import ma.ensa.wallet.response.Balance;
+import org.bitcoinj.core.Address;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 
 @RestController
+@CrossOrigin(methods = RequestMethod.GET)
 public class HomeController {
     @Autowired
-    private MyWallet myWallet;
+    private WalletCore myWallet;
 
-    @RequestMapping(value = "/index")
-    public String index() {
-        return "Greetings from Spring Boot!";
+    @GetMapping(value = "/getBalance")
+    public Balance getBalance() {
+        return myWallet.getBalance();
     }
 
-    @RequestMapping(value = "/getBalance")
-    public String getBalance() {
-        return myWallet.getBalance().toFriendlyString();
+    @GetMapping(value = "/getAddress")
+    public PublicAddress getAddress() {
+        return myWallet.getAddress();
     }
 
-    @RequestMapping(value = "/getTransactions")
+    @GetMapping(value = "/getTransactions")
     public List<TransactionInfo> getTransactions() {
         return myWallet.getTransactions();
     }
 
-    @RequestMapping(value = "/send")
-    public String send(@RequestParam String amount, @RequestParam String address) {
-        myWallet.send(amount, address);
-        return "Done!";
+    @GetMapping (value = "/send")
+    public SendResponse send(@RequestParam String amount, @RequestParam String address) {
+        return myWallet.send(amount, address);
     }
 }

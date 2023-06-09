@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.MoreExecutors;
+import ma.ensa.wallet.response.Balance;
+import ma.ensa.wallet.response.PublicAddress;
+import ma.ensa.wallet.response.SendResponse;
+import ma.ensa.wallet.response.TransactionInfo;
 import org.bitcoinj.core.*;
 import org.bitcoinj.kits.WalletAppKit;
-import org.bitcoinj.script.Script;
-import org.bitcoinj.script.ScriptChunk;
+import org.bitcoinj.wallet.KeyChain;
 import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,11 +19,14 @@ import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
 @Component
-public class MyWallet {
+public class WalletCore {
 
     @JsonIgnore
     @Autowired
@@ -61,9 +67,21 @@ public class MyWallet {
         System.out.println("Send coins to: " + sendToAddress);
     }
 
-    public Coin getBalance() {
+    public PublicAddress getAddress() {
+        PublicAddress address = new PublicAddress();
         Wallet wallet = walletAppKit.wallet();
-        return wallet.getBalance();
+        Address currentAddress = wallet.currentAddress(KeyChain.KeyPurpose.RECEIVE_FUNDS);
+
+        address.setAddress(currentAddress.toString());
+        return address;
+    }
+
+    public Balance getBalance() {
+        Balance balance = new Balance();
+        Wallet wallet = walletAppKit.wallet();
+
+        balance.setBalance(wallet.getBalance().toFriendlyString());
+        return balance;
     }
 
     public List<TransactionInfo> getTransactions() {
@@ -72,11 +90,11 @@ public class MyWallet {
 
         for (Transaction transaction : wallet.getTransactionsByTime()) {
             TransactionInfo transactionInfo = new TransactionInfo();
-            transactionInfo.setTxId(transaction.getTxId().toString());
             transactionInfo.setValue(transaction.getValue(wallet).toFriendlyString());
             transactionInfo.setHash(transaction.getHashAsString());
-            transactionInfo.setReceiver(getReceiverAddress(transaction));
-            transactionInfo.setSender(getSenderAddress(transaction));
+            long timestamp = transaction.getUpdateTime().getTime();
+            LocalDateTime date = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDateTime();
+            transactionInfo.setDate(date.toString());
 
             transactionInfos.add(transactionInfo);
         }
@@ -84,41 +102,18 @@ public class MyWallet {
         return transactionInfos;
     }
 
-    private String getReceiverAddress(Transaction transaction) {
-        for (TransactionOutput output : transaction.getOutputs()) {
-            Script script = output.getScriptPubKey();
-            if (script.isSentToAddress()) {
-                return script.getToAddress(networkParameters).toString();
-            }
-        }
-        return "";
-    }
-
-    private String getSenderAddress(Transaction transaction) {
+    public SendResponse send(String value, String to) {
+        Coin amountToSend = Coin.parseCoin(value);
         Wallet wallet = walletAppKit.wallet();
-        for (TransactionInput input : transaction.getInputs()) {
-            Script scriptSig = input.getScriptSig();
-            if (scriptSig.isSentToAddress()) {
-                Address address = scriptSig.getToAddress(networkParameters);
-                if (wallet.isAddressMine(address)) {
-                    return address.toString();
-                }
-            } else if (scriptSig.isPayToScriptHash()) {
-                List<ScriptChunk> chunks = scriptSig.getChunks();
-                if (chunks.size() >= 2) {
-                    byte[] redeemScriptBytes = chunks.get(chunks.size() - 2).data;
-                    Script redeemScript = new Script(redeemScriptBytes);
-                    Address address = redeemScript.getToAddress(networkParameters);
-                    if (wallet.isAddressMine(address)) {
-                        return address.toString();
-                    }
-                }
-            }
-        }
-        return "";
-    }
+        Coin balance = wallet.getBalance();
 
-    public void send(String value, String to) {
+        SendResponse response = new SendResponse();
+
+        if (amountToSend.isGreaterThan(balance)) {
+            response.setError(1);
+            response.setMessage("Insufficient balance. You can't send more than your current balance.");
+            return response;
+        }
         try {
             Address toAddress = LegacyAddress.fromBase58(networkParameters, to);
             SendRequest sendRequest = SendRequest.to(toAddress, Coin.parseCoin(value));
@@ -127,8 +122,13 @@ public class MyWallet {
             sendResult.broadcastComplete.addListener(() ->
                             System.out.println("Sent coins onwards! Transaction hash is " + sendResult.tx.getTxId()),
                     MoreExecutors.directExecutor());
+            response.setError(0);
+            response.setMessage("Your Transactions is completed successfully.");
+            return response;
         } catch (InsufficientMoneyException e) {
-            throw  new RuntimeException(e);
+            response.setError(1);
+            response.setMessage("An Error occur during the transaction, please try again.");
+            return response;
         }
     }
 }
